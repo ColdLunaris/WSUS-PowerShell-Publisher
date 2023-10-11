@@ -47,6 +47,14 @@ $sdp.InstallableItems[0].IsInstalledApplicabilityRule = @'
 
 # Superseed old updates
 $sdp.SupersededPackages.Add('b1f0b37c-dcc7-4204-a535-5c1e199896c6')
+$sdp.SupersededPackages.Add('a973c77b-5898-4b0e-b5de-c1239e55fbdc')
+$sdp.SupersededPackages.Add('355b38b7-bddc-4e14-96ff-9cbe117d868a')
+$sdp.SupersededPackages.Add('989cc724-dbf8-4baa-83a6-918508ff84cb')
+$sdp.SupersededPackages.Add('b33e00d1-8855-4b3c-965c-ef84229a9b69')
+$sdp.SupersededPackages.Add('9e8ec786-d477-4afb-abc9-7029baae9950')
+$sdp.SupersededPackages.Add('71a6557e-aa15-4e1f-b5d6-a5a522d7f343')
+$sdp.SupersededPackages.Add('64e45086-11fd-4aaf-abe8-1b05d673255f')
+$sdp.SupersededPackages.Add('04408308-1550-4748-a702-df6bccbab06e')
 
 # Add general information
 Write-Host "Adding general information" -f Green
