@@ -61,6 +61,7 @@ Write-Host "Adding general information" -f Green
 $sdp.Title = "Spyder IDE 5.4.5"
 $sdp.Description = "This update contains bug fixes and security updates"
 $sdp.VendorName = "Lunaris"
+$sdp.ProductNames.Add("Local Publishing") | Out-Null
 $sdp.DefaultLanguage = "en"
 $sdp.SupportUrl = "https://github.com/spyder-ide/spyder/releases/tag/v5.4.5"
 $sdp.PackageUpdateType = "Software"
