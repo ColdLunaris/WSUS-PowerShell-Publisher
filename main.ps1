@@ -2,7 +2,7 @@
 
 # Get digest
 Write-Host "Creating digest for update file" -f Green
-$filePath = "C:\Users\administrator.LUNARIS\Desktop\Spyder_64bit_full.exe"
+$filePath = "C:\Users\administrator.LUNARIS\Desktop\Spyder IDE\Spyder_64bit_full.exe"
 $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
 $sha1 = New-Object System.Security.Cryptography.SHA1CryptoServiceProvider
 $sha256 = New-Object System.Security.Cryptography.SHA256CryptoServiceProvider
@@ -50,7 +50,7 @@ $sdp.SupersededPackages.Add('b1f0b37c-dcc7-4204-a535-5c1e199896c6')
 
 # Add general information
 Write-Host "Adding general information" -f Green
-$sdp.Title = "Spyder 5.4.5"
+$sdp.Title = "Spyder IDE 5.4.5"
 $sdp.Description = "This update contains bug fixes and security updates"
 $sdp.VendorName = "Lunaris"
 $sdp.DefaultLanguage = "en"
