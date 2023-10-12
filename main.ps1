@@ -1,4 +1,4 @@
-﻿[void][reflection.assembly]::LoadWithPartialName(“Microsoft.UpdateServices.Administration”)
+﻿[void][reflection.assembly]::LoadWithPartialName("Microsoft.UpdateServices.Administration")
 
 # Get digest
 Write-Host "Creating digest for update file" -f Green
@@ -39,10 +39,25 @@ $sdp.InstallableItems[0].ReturnCodes.Add($rc2)
 # Create detection rules
 Write-Host "Creating detection rules" -f Green
 $sdp.InstallableItems[0].IsInstallableApplicabilityRule = @'
-<bar:RegKeyExists Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Spyder" />
+<lar:And>
+    <bar:RegKeyLoop Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" TrueIf="Any">
+        <lar:And>
+            <bar:RegSzToVersion Comparison="LessThan" Data="5.4.5.0" Value="DisplayVersion" Key="HKEY_LOOP_TARGET" Subkey="\" />
+            <bar:RegSz Key="HKEY_LOOP_TARGET" Subkey="\" Value="DisplayName" Comparison="Contains" Data="Spyder" />
+        </lar:And>
+    </bar:RegKeyLoop>
+    <bar:WindowsVersion Comparison="GreaterThanOrEqualTo" MajorVersion="10" MinorVersion="0" />
+</lar:And>
 '@
 $sdp.InstallableItems[0].IsInstalledApplicabilityRule = @'
-<bar:RegSzToVersion Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Spyder" Value="DisplayVersion" Comparison="EqualTo" Data="5.4.5.0" />
+<lar:And>
+    <bar:RegKeyLoop Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" TrueIf="Any">
+        <lar:And>
+            <bar:RegSzToVersion Comparison="GreaterThanOrEqualTo" Data="5.4.5.0" Value="DisplayVersion" Key="HKEY_LOOP_TARGET" Subkey="\" />
+            <bar:RegSz Key="HKEY_LOOP_TARGET" Subkey="\" Value="DisplayName" Comparison="Contains" Data="Spyder" />
+        </lar:And>
+    </bar:RegKeyLoop>
+</lar:And>
 '@
 
 # Superseed old updates
@@ -55,6 +70,7 @@ $sdp.SupersededPackages.Add('9e8ec786-d477-4afb-abc9-7029baae9950')
 $sdp.SupersededPackages.Add('71a6557e-aa15-4e1f-b5d6-a5a522d7f343')
 $sdp.SupersededPackages.Add('64e45086-11fd-4aaf-abe8-1b05d673255f')
 $sdp.SupersededPackages.Add('04408308-1550-4748-a702-df6bccbab06e')
+$sdp.SupersededPackages.Add('a1b60c15-5639-4b30-9b07-4bec28d12347')
 
 # Add general information
 Write-Host "Adding general information" -f Green
@@ -63,7 +79,8 @@ $sdp.Description = "This update contains bug fixes and security updates"
 $sdp.VendorName = "Lunaris"
 $sdp.ProductNames.Add("Local Publishing") | Out-Null
 $sdp.DefaultLanguage = "en"
-$sdp.SupportUrl = "https://github.com/spyder-ide/spyder/releases/tag/v5.4.5"
+$sdp.AdditionalInformationUrls.Add("https://github.com/spyder-ide/spyder/releases/tag/v5.4.5")
+$sdp.SupportUrl = "https://www.spyder-ide.org/"
 $sdp.PackageUpdateType = "Software"
 $sdp.PackageType = "Update"
 $sdp.SecurityRating = "Moderate"
