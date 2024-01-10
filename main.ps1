@@ -1,19 +1,28 @@
 ﻿[void][reflection.assembly]::LoadWithPartialName("Microsoft.UpdateServices.Administration")
 
+try {
+    Write-Host "Establishing connection to WSUS" -f Green
+    [Microsoft.UpdateServices.Administration.IUpdateServer]$wsus = [Microsoft.UpdateServices.Administration.AdminProxy]::GetUpdateServer("LUNSCCM01", $true, 8531)
+}
+catch {
+    Write-Error "Could not establish connection to WSUS"
+    throw
+}
+
 # Get digest
 Write-Host "Creating digest for update file" -f Green
-$filePath = "C:\Users\administrator.LUNARIS\Desktop\Spyder IDE\Spyder_64bit_full.exe"
+$filePath = "$($env:USERPROFILE)\Desktop\Spyder IDE\Spyder_64bit_full.exe"
 $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
-$sha1 = New-Object System.Security.Cryptography.SHA1CryptoServiceProvider
-$sha256 = New-Object System.Security.Cryptography.SHA256CryptoServiceProvider
+$sha1 = [System.Security.Cryptography.SHA1CryptoServiceProvider]::New()
 $sha1HashBytes = $sha1.ComputeHash($fileBytes)
-$sha256HashBytes = $sha256.ComputeHash($fileBytes)
 $sha1Base64 = [System.Convert]::ToBase64String($sha1HashBytes)
+$sha256 = [System.Security.Cryptography.SHA256CryptoServiceProvider]::New()
+$sha256HashBytes = $sha256.ComputeHash($fileBytes)
 $sha256Base64 = [System.Convert]::ToBase64String($sha256HashBytes)
 
 # Create Software Distribution Package and populate information from EXE file
 Write-Host "Creating `"Software Distribution Package`"-definition" -f Green
-$sdp = New-Object Microsoft.UpdateServices.Administration.SoftwareDistributionPackage
+$sdp = [Microsoft.UpdateServices.Administration.SoftwareDistributionPackage]::New()
 $sdp.PopulatePackageFromExe($filePath)
 $sdp.InstallableItems[0].Arguments = "/S"
 
@@ -27,8 +36,8 @@ $sdp.InstallableItems[0].OriginalSourceFile.OriginUri = "https://github.com/spyd
 
 # Add return codes for successful install reboot required
 Write-Host "Adding reboot codes" -f Green
-$rc1 = New-Object Microsoft.UpdateServices.Administration.ReturnCode
-$rc2 = New-Object Microsoft.UpdateServices.Administration.ReturnCode
+$rc1 = [Microsoft.UpdateServices.Administration.ReturnCode]::New()
+$rc2 = [Microsoft.UpdateServices.Administration.ReturnCode]::New()
 $rc1.IsRebootRequired = $true
 $rc2.IsRebootRequired = $true
 $rc1.ReturnCodeValue = 1641
@@ -36,41 +45,132 @@ $rc2.ReturnCodeValue = 3010
 $sdp.InstallableItems[0].ReturnCodes.Add($rc1)
 $sdp.InstallableItems[0].ReturnCodes.Add($rc2)
 
-# Create detection rules
-Write-Host "Creating detection rules" -f Green
-$sdp.InstallableItems[0].IsInstallableApplicabilityRule = @'
-<lar:And>
-    <bar:RegKeyLoop Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" TrueIf="Any">
-        <lar:And>
-            <bar:RegSzToVersion Comparison="LessThan" Data="5.4.5.0" Value="DisplayVersion" Key="HKEY_LOOP_TARGET" Subkey="\" />
-            <bar:RegSz Key="HKEY_LOOP_TARGET" Subkey="\" Value="DisplayName" Comparison="Contains" Data="Spyder" />
-        </lar:And>
-    </bar:RegKeyLoop>
-    <bar:WindowsVersion Comparison="GreaterThanOrEqualTo" MajorVersion="10" MinorVersion="0" />
-</lar:And>
-'@
-$sdp.InstallableItems[0].IsInstalledApplicabilityRule = @'
-<lar:And>
-    <bar:RegKeyLoop Key="HKEY_LOCAL_MACHINE" Subkey="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" TrueIf="Any">
-        <lar:And>
-            <bar:RegSzToVersion Comparison="GreaterThanOrEqualTo" Data="5.4.5.0" Value="DisplayVersion" Key="HKEY_LOOP_TARGET" Subkey="\" />
-            <bar:RegSz Key="HKEY_LOOP_TARGET" Subkey="\" Value="DisplayName" Comparison="Contains" Data="Spyder" />
-        </lar:And>
-    </bar:RegKeyLoop>
-</lar:And>
-'@
+#region Creation of Applicability rule in XML
+Write-Host "Setting up XML for IsInstallable" -f Green
+
+# Set up XML Writer. Omit duplicate namespaces
+$stringWriter = [System.IO.StringWriter]::New()
+$xmlSettings = [System.Xml.XmlWriterSettings]::New()
+$xmlSettings.Indent = $true
+$xmlSettings.OmitXmlDeclaration = $true
+$xmlSettings.NamespaceHandling = [System.Xml.NamespaceHandling]::OmitDuplicates
+$xmlWriter = [System.Xml.XmlWriter]::Create($stringWriter, $xmlSettings)
+
+# Write upper And element
+$xmlWriter.WriteStartElement("lar", "And", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/LogicalApplicabilityRules.xsd")
+
+# Write condition for Windows 10 or higher
+$xmlWriter.WriteStartElement("bar", "WindowsVersion", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Comparison", "GreaterThanOrEqualTo")
+$xmlWriter.WriteAttributeString("MajorVersion", "10")
+$xmlWriter.WriteAttributeString("MinorVersion", "0")
+$xmlWriter.WriteEndElement()
+
+# Write registry loop element
+$xmlWriter.WriteStartElement("bar", "RegKeyLoop", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOCAL_MACHINE")
+$xmlWriter.WriteAttributeString("Subkey", "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+$xmlWriter.WriteAttributeString("TrueIf", "Any")
+
+# Write And element to combine the following registry conditions
+$xmlWriter.WriteStartElement("lar", "And", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/LogicalApplicabilityRules.xsd")
+
+# Write registry loop conditions
+$xmlWriter.WriteStartElement("bar", "RegSzToVersion", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOOP_TARGET")
+$xmlWriter.WriteAttributeString("Subkey", "\")
+$xmlWriter.WriteAttributeString("Value", "DisplayVersion")
+$xmlWriter.WriteAttributeString("Comparison", "LessThan")
+$xmlWriter.WriteAttributeString("Data", "5.4.5.0")
+$xmlWriter.WriteEndElement()
+
+$xmlWriter.WriteStartElement("bar", "RegSz", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOOP_TARGET")
+$xmlWriter.WriteAttributeString("Subkey", "\")
+$xmlWriter.WriteAttributeString("Value", "DisplayName")
+$xmlWriter.WriteAttributeString("Comparison", "Contains")
+$xmlWriter.WriteAttributeString("Data", "Spyder")
+$xmlWriter.WriteEndElement()
+
+# End And element for registry conditions
+$xmlWriter.WriteEndElement()
+
+# End registry loop
+$xmlWriter.WriteEndElement()
+
+# End upper And
+$xmlWriter.WriteEndElement()
+
+# Write changes to stringWriter
+$xmlWriter.Flush()
+$xmlWriter.Close()
+
+$isInstallable = $stringWriter.ToString() -replace " xmlns.*", ">" -replace "`"0`">", "`"0`" />"
+#endregion
+
+#region Creation of Installed rule in XML
+Write-Host "Setting up XML for IsInstalled" -f Green
+
+# Set up XML Writer. Omit duplicate namespaces
+$stringWriter = [System.IO.StringWriter]::New()
+$xmlSettings = [System.Xml.XmlWriterSettings]::New()
+$xmlSettings.Indent = $true
+$xmlSettings.OmitXmlDeclaration = $true
+$xmlSettings.NamespaceHandling = [System.Xml.NamespaceHandling]::OmitDuplicates
+$xmlWriter = [System.Xml.XmlWriter]::Create($stringWriter, $xmlSettings)
+
+# Write registry loop element
+$xmlWriter.WriteStartElement("bar", "RegKeyLoop", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOCAL_MACHINE")
+$xmlWriter.WriteAttributeString("Subkey", "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+$xmlWriter.WriteAttributeString("TrueIf", "Any")
+
+# Write And element to combine the following registry conditions
+$xmlWriter.WriteStartElement("lar", "And", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/LogicalApplicabilityRules.xsd")
+
+# Write registry loop conditions
+$xmlWriter.WriteStartElement("bar", "RegSzToVersion", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOOP_TARGET")
+$xmlWriter.WriteAttributeString("Subkey", "\")
+$xmlWriter.WriteAttributeString("Value", "DisplayVersion")
+$xmlWriter.WriteAttributeString("Comparison", "GreaterThanOrEqualTo")
+$xmlWriter.WriteAttributeString("Data", "5.4.5.0")
+$xmlWriter.WriteEndElement()
+
+$xmlWriter.WriteStartElement("bar", "RegSz", "https://schemas.microsoft.com/wsus/2005/04/CorporatePublishing/BaseApplicabilityRules.xsd")
+$xmlWriter.WriteAttributeString("Key", "HKEY_LOOP_TARGET")
+$xmlWriter.WriteAttributeString("Subkey", "\")
+$xmlWriter.WriteAttributeString("Value", "DisplayName")
+$xmlWriter.WriteAttributeString("Comparison", "Contains")
+$xmlWriter.WriteAttributeString("Data", "Spyder")
+$xmlWriter.WriteEndElement()
+
+# End And element for registry conditions
+$xmlWriter.WriteEndElement()
+
+# End registry loop
+$xmlWriter.WriteEndElement()
+
+
+# Write changes to stringWriter
+$xmlWriter.Flush()
+$xmlWriter.Close()
+
+$isInstalled = $stringWriter.ToString() -replace " xmlns.*", ">"
+#endregion
+
+# Apply XML rules
+$sdp.InstallableItems[0].IsInstallableApplicabilityRule = $isInstallable
+$sdp.InstallableItems[0].IsInstalledApplicabilityRule = $isInstalled
 
 # Superseed old updates
-$sdp.SupersededPackages.Add('b1f0b37c-dcc7-4204-a535-5c1e199896c6')
-$sdp.SupersededPackages.Add('a973c77b-5898-4b0e-b5de-c1239e55fbdc')
-$sdp.SupersededPackages.Add('355b38b7-bddc-4e14-96ff-9cbe117d868a')
-$sdp.SupersededPackages.Add('989cc724-dbf8-4baa-83a6-918508ff84cb')
-$sdp.SupersededPackages.Add('b33e00d1-8855-4b3c-965c-ef84229a9b69')
-$sdp.SupersededPackages.Add('9e8ec786-d477-4afb-abc9-7029baae9950')
-$sdp.SupersededPackages.Add('71a6557e-aa15-4e1f-b5d6-a5a522d7f343')
-$sdp.SupersededPackages.Add('64e45086-11fd-4aaf-abe8-1b05d673255f')
-$sdp.SupersededPackages.Add('04408308-1550-4748-a702-df6bccbab06e')
-$sdp.SupersededPackages.Add('a1b60c15-5639-4b30-9b07-4bec28d12347')
+Write-Host "Checking for old updates. If any are found they will be superseded" -f Green
+$updates = $wsus.SearchUpdates("Spyder")
+if ($updates.Count -ge 1) {
+    $updates | ForEach-Object {
+        $sdp.SupersededPackages.Add($($_.id.UpdateId.Guid))
+    }
+}
 
 # Add general information
 Write-Host "Adding general information" -f Green
@@ -88,15 +188,14 @@ $sdp.PackageUpdateClassification = "SecurityUpdates"
 
 # Publish package
 Write-Host "Saving SDP XML" -f Green
-$sdpFilePath = "C:\Users\administrator.LUNARIS\Desktop\$($sdp.Title) $($sdp.PackageId.ToString()).xml"
+$sdpFilePath = "$($env:USERPROFILE)\Desktop\$($sdp.Title) $($sdp.PackageId.ToString()).xml"
 $sdp.Save($sdpFilePath)
 $sourcePath = $filePath.Substring(0, $filePath.LastIndexOf('\'))
 
-Write-Host "Creating connection to WSUS in preparation for publishing" -f Green
-[Microsoft.UpdateServices.Administration.IUpdateServer]$wsus = [Microsoft.UpdateServices.Administration.AdminProxy]::GetUpdateServer("LUNSCCM01", $true, 8531)
+Write-Host "Loading SDP into publisher interface" -f Green
 [Microsoft.UpdateServices.Administration.IPublisher]$publisher = $wsus.GetPublisher($sdpFilePath)
 
-Write-Host "Publishing update. This will take a while..." -f Green
+Write-Host "Publishing update. Depending on the size of the file(s), this might take a while..." -f Green
 $timer = [System.Diagnostics.Stopwatch]::New()
 $timer.Start()
 $publisher.PublishPackage($sourcePath, $null)
