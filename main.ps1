@@ -14,6 +14,7 @@ $description = "This update contains bug fixes and security updates"
 $vendorName = "Lunaris"
 $productName = "SCUP Updates"
 $defaultLanguage = "en"
+$classification = "Updates" # https://learn.microsoft.com/en-us/previous-versions/windows/desktop/aa354317(v=vs.85)
 $additionalInformation = "https://github.com/spyder-ide/spyder/blob/master/changelogs/Spyder-5.md#version-550-2023-11-08"
 $supportUrl = "https://www.spyder-ide.org/"
 
@@ -71,10 +72,9 @@ $sdp.ProductNames.Add($productName) | Out-Null
 $sdp.DefaultLanguage = $defaultLanguage
 $sdp.AdditionalInformationUrls.Add($additionalInformation)
 $sdp.SupportUrl = $supportUrl
-$sdp.PackageUpdateType = "Software"
 $sdp.PackageType = "Update"
 $sdp.SecurityRating = "Moderate"
-$sdp.PackageUpdateClassification = "SecurityUpdates"
+$sdp.PackageUpdateClassification = [Microsoft.UpdateServices.Administration.PackageUpdateClassification]::$classification
 
 # Get digests
 Write-Host "Creating SHA1 and SHA256 digests for source file"
@@ -246,12 +246,15 @@ Write-Host "Loading SDP into publisher interface"
 # Create separate runspace to allow for monitoring publisher progress via ProgressHandler event handler
 $runspace = [runspacefactory]::CreateRunspace($Host)
 $runspace.Open()
-
-# Add publisher and sdp to runspace
 $runspace.SessionStateProxy.PSVariable.Set([psvariable]::New('publisher', $publisher))
+$newlinePrinted = $false
+$indicatorValue = 0
 
 # Scriptblock that reads the event handler and prints progress
 $powershell = [powershell]::Create().AddScript({
+    # Use reference pointer so we can save variables between runs
+    param([ref]$newlinePrinted, [ref]$indicatorValue)
+
     $objectEvent = @{
         InputObject      = $publisher
         EventName        = 'ProgressHandler'
@@ -259,19 +262,46 @@ $powershell = [powershell]::Create().AddScript({
         Action           = {
             # Percentage is calculated per job
             $percentage = [math]::Round($($eventArgs.CurrentProgress / $eventArgs.UpperProgressBound * 100))
-            $string = "{0}% - {1}: `"{2}`"" -f $percentage, $eventArgs.ProgressStep, $EventArgs.ProgressInfo
+            $scroll = "/-\|/-\|"
+
+            # Prettify percentage by adding spaces at the start based on how many digits we're printing
+            $space = switch ($($percentage.ToString().Length)) {
+                1 { "  " }
+                2 { " " }
+                default { "" }
+            }
+            $string = "$space{0}% - {1}: `"{2}`"" -f $percentage, $eventArgs.ProgressStep, $EventArgs.ProgressInfo
 
             # Console buffer width is found to keep progress on the same line
-            Write-Host -NoNewline ("`r{0,-$([console]::BufferWidth)}" -f $string)
+            if ($percentage -ne 100) {
+                Write-Host -NoNewline ("`r{0,-$([console]::BufferWidth-4)}[$($scroll[$indicatorValue.Value])]" -f $string)
+            }
+            else {
+                Write-Host -NoNewline ("`r{0,-$([console]::BufferWidth)}" -f $string)
+            }
 
-            # Write newline when moving to next step of publishing
-            if ($percentage -eq 100) {
+            # Reset scroll when indicator is out of range
+            $indicatorValue.Value += 1
+            if ($indicatorValue.Value -ge $scroll.Length) {
+                $indicatorValue.Value = 0
+            }
+
+            # Write newline when moving to next step of publishing. Only print newline once
+            if ($percentage -eq 100 -and $newlinePrinted.Value -eq $false) {
                 Write-Host
+                $newlinePrinted.Value = $true
+            }
+
+            # Reset newline bool to $false when percentage is not 100
+            if ($percentage -ne 100 -and $newlinePrinted.Value -eq $true) {
+                $newlinePrinted.Value = $false
             }
         }
     }
     Register-ObjectEvent @objectEvent
 })
+$powershell.AddArgument([ref]$newlinePrinted) | Out-Null
+$powershell.AddArgument([ref]$indicatorValue) | Out-Null
 
 # Start runspace
 $powershell.Runspace = $runspace
